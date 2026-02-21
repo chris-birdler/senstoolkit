@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "senstoolkit"
+version = "0.1.0"
+description = "Sensitivity analysis toolkit: DOE generation and multi-method analysis"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+full = ["xgboost", "shap", "SALib"]
+
+[project.scripts]
+senstoolkit = "senstoolkit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

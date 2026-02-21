@@ -1,0 +1,855 @@
+\documentclass[11pt,a4paper]{article}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{parskip}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!70!black,
+  urlcolor=blue!60!black,
+  citecolor=green!50!black,
+}
+
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  stringstyle=\color{red!60!black},
+  commentstyle=\color{green!50!black}\itshape,
+  backgroundcolor=\color{gray!8},
+  frame=single,
+  rulecolor=\color{gray!40},
+  breaklines=true,
+  showstringspaces=false,
+  columns=flexible,
+  xleftmargin=1em,
+  framexleftmargin=0.5em,
+}
+
+\lstdefinestyle{bash}{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{black!5},
+  frame=single,
+  rulecolor=\color{gray!40},
+  breaklines=true,
+  xleftmargin=1em,
+  framexleftmargin=0.5em,
+}
+
+% ── Title ─────────────────────────────────────────────────────────────────────
+\title{%
+  \textbf{senstoolkit} \\[0.3em]
+  \large Sensitivity Analysis Toolkit --- User Manual \\[0.2em]
+  \normalsize Version 0.1.0
+}
+\author{}
+\date{\today}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Introduction}
+\label{sec:intro}
+
+\texttt{senstoolkit} is a Python package for performing comprehensive sensitivity analysis on simulation or experimental data.  It covers the full workflow from experimental design through multi-method analysis:
+
+\begin{enumerate}
+  \item \textbf{Design of Experiments (DOE)} --- generate space-filling Sobol quasi-random samples over user-defined parameter ranges.
+  \item \textbf{Multi-method sensitivity analysis} --- run 12 complementary analysis methods on the filled DOE, producing CSV tables and publication-ready plots.
+\end{enumerate}
+
+The toolkit is fully generic: it works with arbitrary parameter names, arbitrary numbers of parameters, and arbitrary response (output) variables.  No domain-specific defaults are hard-coded.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Installation}
+\label{sec:install}
+
+\subsection{Basic Installation}
+
+\begin{lstlisting}[style=bash]
+cd sensitivity_analysis/
+pip install -e .
+\end{lstlisting}
+
+This installs the core dependencies: \texttt{numpy}, \texttt{pandas}, \texttt{scipy}, \texttt{scikit-learn}, and \texttt{matplotlib}.
+
+\subsection{Full Installation (Recommended)}
+
+To enable all analysis methods (XGBoost surrogate, SHAP, Sobol via SALib, Morris screening):
+
+\begin{lstlisting}[style=bash]
+pip install -e ".[full]"
+\end{lstlisting}
+
+This additionally installs \texttt{xgboost}, \texttt{shap}, and \texttt{SALib}.
+
+\subsection{Optional Dependencies and Feature Gating}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Package} & \textbf{Features enabled} & \textbf{Fallback} \\
+\midrule
+\texttt{xgboost} & XGBoost surrogate, gain importance, SHAP & \texttt{HistGradientBoostingRegressor} \\
+\texttt{shap} & SHAP values, SHAP interactions & Skipped \\
+\texttt{SALib} & Sobol indices (SALib), Morris screening & Manual Sobol / skipped \\
+\bottomrule
+\end{tabular}
+\caption{Optional dependencies and their fallback behaviour.}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Quick Start}
+\label{sec:quickstart}
+
+A typical workflow consists of four steps:
+
+\begin{enumerate}
+  \item \textbf{Create a parameter template} and edit it to define your parameters.
+  \item \textbf{Generate a DOE} (Design of Experiments).
+  \item \textbf{Run your simulation} to fill in the response columns.
+  \item \textbf{Run the analysis} to obtain sensitivity results.
+\end{enumerate}
+
+\subsection{Step 1: Create a Parameter File}
+
+\begin{lstlisting}[style=bash]
+senstoolkit template --output my_params.json
+\end{lstlisting}
+
+This creates a JSON file with example parameters.  Edit it to define your own:
+
+\begin{lstlisting}
+{
+  "temperature": {"min": 300, "max": 800, "scale": "linear"},
+  "pressure":    {"min": 0.1, "max": 100, "scale": "log"},
+  "flow_rate":   {"min": 0.5, "max": 5.0, "scale": "linear"}
+}
+\end{lstlisting}
+
+Each parameter requires:
+\begin{itemize}
+  \item \texttt{min}, \texttt{max} --- the lower and upper bounds.
+  \item \texttt{scale} --- \texttt{"linear"} (uniform sampling) or \texttt{"log"} (log-uniform sampling; requires \texttt{min > 0}).
+\end{itemize}
+
+\subsection{Step 2: Generate a DOE}
+
+\begin{lstlisting}[style=bash]
+senstoolkit design --params my_params.json \
+                   --n-samples 128 \
+                   --seed 42 \
+                   --output doe.csv \
+                   --response-cols yield efficiency
+\end{lstlisting}
+
+This produces:
+\begin{itemize}
+  \item \texttt{doe.csv} --- a CSV with columns: \texttt{id}, parameter columns, and empty response columns (\texttt{yield}, \texttt{efficiency}).
+  \item \texttt{doe.params.json} --- a sidecar file storing the parameter bounds, scales, seed, and sample count (needed for extending and analysing).
+\end{itemize}
+
+\subsection{Step 3: Fill in the Response Values}
+
+Open \texttt{doe.csv} in a spreadsheet or run your simulation code to populate the \texttt{yield} and \texttt{efficiency} columns with the corresponding output values for each parameter combination.
+
+\subsection{Step 4: Run the Analysis}
+
+\begin{lstlisting}[style=bash]
+senstoolkit analyze --csv doe.csv \
+                    --response-cols yield efficiency \
+                    --out-dir results/
+\end{lstlisting}
+
+All output files (CSV tables and PNG plots) are written to the \texttt{results/} directory.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Extending an Existing DOE}
+\label{sec:extend}
+
+Sobol sequences are extensible by design.  If you need more samples after an initial run, you can extend the DOE without discarding existing simulation results:
+
+\begin{lstlisting}[style=bash]
+senstoolkit extend --csv doe.csv --n-new 256
+\end{lstlisting}
+
+This:
+\begin{itemize}
+  \item Reads the original seed from the sidecar file (\texttt{doe.params.json}).
+  \item Uses \texttt{Sobol.fast\_forward()} to skip past the existing points.
+  \item Generates 256 new quasi-random samples and appends them to \texttt{doe.csv}.
+  \item Preserves all existing rows (including already-filled response values) unchanged.
+  \item Updates the sidecar metadata.
+\end{itemize}
+
+You can also write to a separate file:
+
+\begin{lstlisting}[style=bash]
+senstoolkit extend --csv doe.csv --n-new 256 --output doe_extended.csv
+\end{lstlisting}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Command-Line Interface Reference}
+\label{sec:cli}
+
+\subsection{\texttt{senstoolkit template}}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Flag} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{--output} & \texttt{parameters\_template.json} & Output file path \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{\texttt{senstoolkit design}}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Flag} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{--params} & (required) & Path to parameters JSON file \\
+\texttt{--n-samples} & $\max(10p,\;50)$ & Number of samples \\
+\texttt{--output} & \texttt{DOE\_<timestamp>.csv} & Output CSV path \\
+\texttt{--seed} & None & Random seed for reproducibility \\
+\texttt{--response-cols} & (empty) & Response column names to add \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{\texttt{senstoolkit extend}}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Flag} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{--csv} & (required) & Path to the existing DOE CSV \\
+\texttt{--n-new} & (required) & Number of new samples to add \\
+\texttt{--output} & (overwrite existing) & Output CSV path \\
+\texttt{--seed} & (from sidecar) & Override the original seed \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{\texttt{senstoolkit analyze}}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Flag} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{--csv} & (required) & Path to the filled DOE CSV \\
+\texttt{--response-cols} & (required) & Response column name(s) \\
+\texttt{--out-dir} & \texttt{outputs} & Output directory \\
+\texttt{--seed} & 0 & Random seed \\
+\texttt{--cv-folds} & 5 & Number of cross-validation folds \\
+\texttt{--r2-threshold} & 0.5 & Minimum CV $R^2$ for surrogate methods \\
+\texttt{--no-pdp} & & Skip PDP/ICE plots \\
+\texttt{--no-shap} & & Skip SHAP analysis \\
+\texttt{--no-group-perm} & & Skip grouped permutation importance \\
+\texttt{--no-sobol} & & Skip Sobol analysis \\
+\texttt{--no-morris} & & Skip Morris screening \\
+\texttt{--no-scatter} & & Skip scatter plot grid \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Python API Reference}
+\label{sec:api}
+
+All functions are importable from the top-level package:
+
+\begin{lstlisting}
+from senstoolkit import (
+    design, extend_design, analyze,
+    write_params_template, morris_screening,
+    parse_params_json, sobol_sample, apply_scaling, write_doe_csv,
+)
+\end{lstlisting}
+
+Submodule imports for advanced use:
+
+\begin{lstlisting}
+from senstoolkit.importance import fit_model, cv_permutation_importance
+from senstoolkit.sobol import sobol_on_surrogate
+from senstoolkit.correlation import correlation_vector, bootstrap_correlation_ci
+from senstoolkit.plotting import scatter_grid, shap_interaction_analysis
+\end{lstlisting}
+
+\subsection{Key Function Signatures}
+
+\begin{lstlisting}
+def design(params_json, n_samples, out_csv,
+           seed=None, prefer_power_of_two=False,
+           response_cols=()):
+
+def extend_design(existing_csv, n_new,
+                  out_csv=None, seed=None):
+
+def analyze(design_csv, response_cols, out_dir="outputs",
+            seed=0, cv_folds=5, perm_repeats=20,
+            bootstrap_corr=1000, group_corr_threshold=0.9,
+            top_k_pdp=6, do_pdp=True, do_shap=True,
+            do_group_perm=True, do_sobol=True,
+            sobol_samples=2048, do_morris=True,
+            do_scatter=True, r2_threshold=0.5):
+\end{lstlisting}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Output Files Reference}
+\label{sec:outputs}
+
+For each response column \texttt{<Y>}, the analysis produces the following files in the output directory:
+
+\begin{longtable}{lp{9cm}}
+\toprule
+\textbf{File} & \textbf{Description} \\
+\midrule
+\endhead
+\texttt{summary.json} & Overall summary: $R^2$ scores, sample counts, surrogate quality \\
+\texttt{scatter\_grid\_<Y>.png} & Scatter plot grid of each parameter vs.\ response \\
+\texttt{correlations\_<Y>.csv} & Spearman \& Pearson correlations with bootstrap 95\% CIs \\
+\texttt{corr\_spearman\_<Y>.png} & Spearman correlation bar chart \\
+\texttt{corr\_pearson\_<Y>.png} & Pearson correlation bar chart \\
+\texttt{perm\_cv\_<Y>.csv} & Cross-validated permutation importance (mean $R^2$ drop) \\
+\texttt{pareto\_perm\_cv\_<Y>.png} & Permutation importance bar chart \\
+\texttt{xgb\_gain\_<Y>.csv} & XGBoost gain importance values \\
+\texttt{pareto\_gain\_<Y>.png} & Gain importance bar chart \\
+\texttt{perm\_groups\_<Y>.csv} & Grouped permutation importance \\
+\texttt{pareto\_perm\_groups\_<Y>.png} & Grouped importance bar chart \\
+\texttt{feature\_corr\_<Y>.csv} & Feature-to-feature correlation matrix \\
+\texttt{morris\_<Y>.csv} & Morris $\mu^*$ and $\sigma$ values \\
+\texttt{morris\_mustar\_<Y>.png} & Morris $\mu^*$ bar chart \\
+\texttt{morris\_sigma\_<Y>.png} & Morris $\sigma$ bar chart \\
+\texttt{pdp/pdp\_<Y>\_<param>.png} & PDP/ICE plots for top parameters \\
+\texttt{shap\_bar\_<Y>.png} & SHAP mean $|$value$|$ bar chart \\
+\texttt{shap/shap\_dep\_<Y>\_<param>.png} & SHAP dependence plots \\
+\texttt{shap\_interactions\_<Y>.csv} & SHAP interaction matrix \\
+\texttt{shap\_interactions\_<Y>.png} & SHAP interaction heatmap \\
+\texttt{sobol\_<Y>.csv} & Sobol $S_1$ and $S_T$ indices \\
+\texttt{sobol\_S1\_<Y>.png} & Sobol first-order bar chart \\
+\texttt{sobol\_ST\_<Y>.png} & Sobol total-order bar chart \\
+\texttt{sobol\_S2\_<Y>.csv} & Sobol second-order interaction matrix \\
+\texttt{sobol\_S2\_<Y>.png} & Sobol $S_2$ interaction heatmap \\
+\bottomrule
+\end{longtable}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Analysis Methods: Background and Interpretation}
+\label{sec:methods}
+
+This section explains each sensitivity analysis method in detail.  For each method we describe: (1)~what it computes, (2)~the mathematical background, (3)~the output files, and (4)~how to interpret the results.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Scatter Plot Grid}
+\label{sec:scatter}
+
+\subsubsection{What It Does}
+
+For each input parameter $x_i$, a scatter plot of $x_i$ versus the response $y$ is produced.  All subplots are arranged in a single grid image.
+
+\subsubsection{Background}
+
+This is the simplest and most direct visual method.  It makes no assumptions about the relationship between parameters and response.  You see the raw data.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{Clear trend} (upward/downward slope, curve) --- the parameter has a visible effect on the response.
+  \item \textbf{Funnel shape} (variance changes with $x_i$) --- the parameter influences not only the mean but also the variability of the response (heteroscedasticity).
+  \item \textbf{Flat cloud} (no pattern) --- the parameter has little or no influence.
+  \item \textbf{Clusters or gaps} --- may indicate discrete regimes, thresholds, or nonlinear effects.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{scatter\_grid\_<Y>.png}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Pearson and Spearman Correlation}
+\label{sec:correlation}
+
+\subsubsection{What It Does}
+
+Computes the Pearson and Spearman rank correlation coefficient between each parameter $x_i$ and the response $y$, along with bootstrap 95\% confidence intervals.
+
+\subsubsection{Mathematical Background}
+
+\paragraph{Pearson correlation ($r$)} measures the strength of the \emph{linear} relationship:
+\begin{equation}
+  r_{x_i, y} = \frac{\sum_{k=1}^{n} (x_{ik} - \bar{x}_i)(y_k - \bar{y})}
+  {\sqrt{\sum_{k=1}^{n} (x_{ik} - \bar{x}_i)^2 \cdot \sum_{k=1}^{n} (y_k - \bar{y})^2}}
+\end{equation}
+
+$r = +1$ means perfect positive linear relationship; $r = -1$ means perfect negative linear relationship; $r = 0$ means no linear relationship (but there may still be a nonlinear one).
+
+\paragraph{Spearman correlation ($\rho$)} replaces values by their ranks before computing the Pearson formula.  It measures the strength of any \emph{monotonic} relationship (linear or not).  If $\rho$ is large but $r$ is small, the relationship is monotonic but nonlinear (e.g., logarithmic).
+
+\paragraph{Bootstrap confidence intervals.}  The toolkit resamples the data (with replacement) 1000 times by default and computes the correlation on each resample.  The 2.5th and 97.5th percentiles of the resampled distribution form the 95\% CI.  If the CI does not include zero, the correlation is statistically significant at the 5\% level.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item $|r|$ or $|\rho| > 0.7$ --- strong relationship.
+  \item $0.3 < |r|$ or $|\rho| \leq 0.7$ --- moderate relationship.
+  \item $|r|$ or $|\rho| \leq 0.3$ --- weak or no relationship.
+  \item \textbf{Sign} indicates direction: positive means $y$ increases as $x_i$ increases.
+  \item If the bootstrap CI includes zero, the correlation is not statistically significant.
+  \item Compare Pearson vs.\ Spearman: a large difference suggests a nonlinear (but monotonic) effect.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{correlations\_<Y>.csv}, \texttt{corr\_spearman\_<Y>.png}, \texttt{corr\_pearson\_<Y>.png}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Surrogate Model and Cross-Validation}
+\label{sec:surrogate}
+
+\subsubsection{What It Does}
+
+Fits a machine learning regression model (XGBoost or HistGradientBoosting) to approximate the mapping $\mathbf{x} \mapsto y$.  The model quality is assessed via $k$-fold cross-validation $R^2$.
+
+\subsubsection{Background}
+
+Many sensitivity analysis methods (Sobol, PDP, SHAP, Morris as implemented here) require evaluating the response at arbitrary parameter combinations.  Since only the DOE samples have actual simulation results, a \emph{surrogate model} (also called emulator or metamodel) is trained to predict $y$ from $\mathbf{x}$.
+
+The surrogate is an XGBoost gradient-boosted tree ensemble (400 trees, learning rate 0.05, max depth 6).  If XGBoost is not installed, scikit-learn's \texttt{HistGradientBoostingRegressor} is used as a fallback.
+
+\paragraph{Cross-validation $R^2$.}  The data is split into $k$ folds (default $k=5$).  For each fold, the model is trained on $k-1$ folds and evaluated on the held-out fold.  The $R^2$ score measures how much variance is explained:
+\begin{equation}
+  R^2 = 1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}
+\end{equation}
+
+$R^2 = 1$ means perfect prediction; $R^2 = 0$ means the model is no better than predicting the mean; $R^2 < 0$ means the model is worse than the mean.
+
+\subsubsection{Surrogate Quality Gate}
+
+If the mean CV $R^2$ falls below the threshold (default 0.5), the toolkit prints a warning and \textbf{skips all surrogate-dependent methods} (PDP, SHAP, Sobol, Morris) for that response.  This prevents misleading results from a poor surrogate.
+
+\textbf{What to do if the quality gate triggers:}
+\begin{itemize}
+  \item Add more samples (\texttt{senstoolkit extend}).
+  \item Check for outliers or data errors in the response column.
+  \item The non-surrogate methods (correlation, scatter, permutation importance) still run and may provide useful insights.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{summary.json} (contains \texttt{cv\_r2\_mean}, \texttt{cv\_r2\_std}, \texttt{train\_r2}, \texttt{surrogate\_ok})
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Permutation Importance (Cross-Validated)}
+\label{sec:perm}
+
+\subsubsection{What It Does}
+
+Measures how much the model's predictive performance ($R^2$) drops when each parameter's values are randomly shuffled.
+
+\subsubsection{Background}
+
+Permutation importance (Breiman, 2001) works as follows:
+\begin{enumerate}
+  \item Train the model on the training fold and compute the baseline $R^2$ on the validation fold.
+  \item For each parameter $x_i$: randomly shuffle (permute) the values of $x_i$ in the validation set, re-predict, and measure the new $R^2$.
+  \item The \emph{importance} of $x_i$ is the drop in $R^2$:
+  \begin{equation}
+    \text{Importance}(x_i) = R^2_{\text{baseline}} - R^2_{\text{permuted}}
+  \end{equation}
+  \item Repeat across all CV folds and multiple permutation repeats; report the mean and standard deviation.
+\end{enumerate}
+
+This is \textbf{model-agnostic}: it measures the importance of a feature to the model's predictions, regardless of the model type.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{Large positive value}: the parameter is important --- shuffling it destroys predictive power.
+  \item \textbf{Near zero}: the parameter contributes little; the model can predict almost as well without it.
+  \item \textbf{Negative value} (rare): shuffling actually improved the score, which typically indicates noise or overfitting.
+  \item The standard deviation across folds indicates how stable the importance estimate is.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{perm\_cv\_<Y>.csv}, \texttt{pareto\_perm\_cv\_<Y>.png}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{XGBoost Gain Importance}
+\label{sec:gain}
+
+\subsubsection{What It Does}
+
+Reports the total reduction in the loss function (``gain'') attributable to each parameter across all splits in all trees of the XGBoost ensemble.
+
+\subsubsection{Background}
+
+Each time a tree node splits on parameter $x_i$, the split produces a gain: the improvement in the loss function.  The \emph{gain importance} of $x_i$ is the sum (or average) of these gains over all trees and all splits involving $x_i$.
+
+This is an \textbf{internal metric of the XGBoost model}.  It is fast to compute (no re-evaluation needed) but can be biased towards high-cardinality or correlated features.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item Higher gain = more important for the model's predictions.
+  \item Compare with permutation importance: if gain is high but permutation importance is low, the feature may be redundant (another correlated feature carries the same information).
+  \item Only available when XGBoost is the surrogate model.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{xgb\_gain\_<Y>.csv}, \texttt{pareto\_gain\_<Y>.png}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Grouped Permutation Importance}
+\label{sec:grouped}
+
+\subsubsection{What It Does}
+
+Identifies groups of highly correlated parameters (using hierarchical clustering at a threshold of $|\text{corr}| \geq 0.9$) and permutes entire groups together to assess their joint importance.
+
+\subsubsection{Background}
+
+When two parameters $x_i$ and $x_j$ are highly correlated, permuting $x_i$ alone may not cause a large $R^2$ drop because $x_j$ carries similar information.  This leads to \emph{underestimation} of their individual importances.
+
+Grouped permutation importance solves this by:
+\begin{enumerate}
+  \item Computing the absolute correlation matrix $|C|$ among all parameters.
+  \item Using agglomerative hierarchical clustering (complete linkage) with distance $d = 1 - |C|$ to form groups of correlated parameters.
+  \item Permuting all parameters in a group \emph{simultaneously} and measuring the joint $R^2$ drop.
+\end{enumerate}
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item A group with a large importance value means those correlated parameters are jointly important.
+  \item If a group has high grouped importance but each member has low individual importance, the effect is shared among the correlated parameters.
+  \item The \texttt{feature\_corr\_<Y>.csv} file lets you inspect which parameters are correlated.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{perm\_groups\_<Y>.csv}, \texttt{pareto\_perm\_groups\_<Y>.png}, \texttt{feature\_corr\_<Y>.csv}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Morris Elementary Effects Screening}
+\label{sec:morris}
+
+\subsubsection{What It Does}
+
+Computes the Morris Elementary Effects (EE) to screen parameters into three categories: negligible, linear/additive, and nonlinear/interactive.
+
+\subsubsection{Mathematical Background}
+
+The Morris method (Morris, 1991) works in a discretized parameter space with $p$ levels.  For each parameter $x_i$, an \emph{elementary effect} is:
+\begin{equation}
+  \text{EE}_i = \frac{f(x_1, \ldots, x_i + \Delta, \ldots, x_d) - f(x_1, \ldots, x_i, \ldots, x_d)}{\Delta}
+\end{equation}
+
+where $\Delta$ is a fixed step size.  Multiple elementary effects are computed along random \emph{trajectories} through the parameter space.
+
+Two summary statistics are reported:
+
+\begin{itemize}
+  \item $\mu^*_i = \frac{1}{r}\sum_{k=1}^{r} |\text{EE}_i^{(k)}|$ --- the mean of the \emph{absolute} elementary effects.  Measures overall influence.
+  \item $\sigma_i = \text{std}(\text{EE}_i^{(1)}, \ldots, \text{EE}_i^{(r)})$ --- the standard deviation of the elementary effects.  Measures nonlinearity and/or interactions.
+\end{itemize}
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{High $\mu^*$, low $\sigma$}: the parameter has a strong, mostly linear/additive effect.
+  \item \textbf{High $\mu^*$, high $\sigma$}: the parameter has a strong effect that is nonlinear and/or interacts with other parameters.
+  \item \textbf{Low $\mu^*$, low $\sigma$}: the parameter has negligible influence and can potentially be fixed.
+  \item Morris is a \emph{screening method}: it efficiently identifies which parameters matter most, especially useful when the number of parameters is large ($d > 10$) and full Sobol analysis would be too expensive.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{morris\_<Y>.csv}, \texttt{morris\_mustar\_<Y>.png}, \texttt{morris\_sigma\_<Y>.png}
+
+\textbf{Requires:} SALib package and a sidecar parameter file.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Partial Dependence Plots (PDP) and Individual Conditional Expectation (ICE)}
+\label{sec:pdp}
+
+\subsubsection{What It Does}
+
+Shows how the predicted response changes as one parameter varies, while averaging over (PDP) or showing individual traces for (ICE) the other parameters.
+
+\subsubsection{Background}
+
+The \emph{partial dependence function} for parameter $x_i$ is:
+\begin{equation}
+  \hat{f}_i(x_i) = \frac{1}{n} \sum_{k=1}^{n} \hat{f}(x_i,\; \mathbf{x}_{-i}^{(k)})
+\end{equation}
+
+where $\mathbf{x}_{-i}^{(k)}$ denotes all other parameters from the $k$-th sample.  In other words: for each value of $x_i$ on a grid, we predict $y$ for every sample (keeping their other parameter values), then average.
+
+\textbf{ICE curves} show the individual predictions $\hat{f}(x_i, \mathbf{x}_{-i}^{(k)})$ without averaging, so you can see whether the effect of $x_i$ is the same for all samples or varies (indicating interactions).
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{Steep PDP curve}: the parameter has a strong effect on the response.
+  \item \textbf{Flat PDP curve}: the parameter has little effect.
+  \item \textbf{Nonlinear PDP curve}: the effect is nonlinear (e.g., saturation, threshold).
+  \item \textbf{ICE curves that diverge} (spread apart): the effect of $x_i$ depends on the values of other parameters --- an indication of \emph{interactions}.
+  \item \textbf{ICE curves that are parallel}: no interactions; the effect of $x_i$ is the same regardless of other parameter values.
+\end{itemize}
+
+PDPs are generated for the top-$k$ most important parameters (by permutation importance).
+
+\subsubsection{Output}
+\texttt{pdp/pdp\_<Y>\_<param>.png} (one plot per top parameter)
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{SHAP (SHapley Additive exPlanations)}
+\label{sec:shap}
+
+\subsubsection{What It Does}
+
+Computes SHAP values for each sample and each parameter, quantifying each parameter's contribution to the prediction.
+
+\subsubsection{Mathematical Background}
+
+SHAP values are based on Shapley values from cooperative game theory (Shapley, 1953; Lundberg \& Lee, 2017).  For each sample $k$ and parameter $i$, the SHAP value $\phi_i^{(k)}$ satisfies:
+\begin{equation}
+  \hat{f}(\mathbf{x}^{(k)}) = \phi_0 + \sum_{i=1}^{d} \phi_i^{(k)}
+\end{equation}
+
+where $\phi_0$ is the average prediction.  The SHAP value $\phi_i^{(k)}$ is the parameter's \emph{marginal contribution}, averaged over all possible orderings of parameters.
+
+\texttt{senstoolkit} uses \texttt{TreeExplainer} for tree-based models, which computes exact SHAP values in polynomial time.
+
+\paragraph{Global importance.}  The mean absolute SHAP value $\overline{|\phi_i|}$ across all samples measures the parameter's global importance.
+
+\paragraph{Dependence plots.}  Plotting $\phi_i^{(k)}$ vs.\ $x_i^{(k)}$ reveals how the parameter's effect varies across its range.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{Mean $|\phi_i|$ bar chart}: ranks parameters by global importance (analogous to permutation importance but exact for the model).
+  \item \textbf{Dependence plot with a clear trend}: the parameter has a consistent directional effect.
+  \item \textbf{Dependence plot with vertical spread at each $x_i$ value}: interactions with other parameters.
+  \item \textbf{Red dashed lines} at $\pm 0.5\sigma_y$: SHAP values exceeding half the response standard deviation indicate a practically significant contribution.
+  \item SHAP values sum to the prediction, so they are \emph{additive} and directly comparable across parameters.
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{shap\_bar\_<Y>.png}, \texttt{shap/shap\_dep\_<Y>\_<param>.png}
+
+\textbf{Requires:} \texttt{shap} and \texttt{xgboost} packages.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{SHAP Interaction Values}
+\label{sec:shap-inter}
+
+\subsubsection{What It Does}
+
+Computes the pairwise SHAP interaction values, producing a $d \times d$ matrix showing how pairs of parameters jointly influence the prediction.
+
+\subsubsection{Background}
+
+SHAP interaction values decompose the SHAP value into main effects and pairwise interactions:
+\begin{equation}
+  \phi_i^{(k)} = \phi_{ii}^{(k)} + \sum_{j \neq i} \phi_{ij}^{(k)}
+\end{equation}
+
+The diagonal $\phi_{ii}$ captures the main effect of parameter $i$; the off-diagonal $\phi_{ij}$ captures the interaction between parameters $i$ and $j$.
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item \textbf{Large diagonal values}: the parameter has a strong main effect.
+  \item \textbf{Large off-diagonal values}: the two parameters interact --- the effect of one depends on the value of the other.
+  \item The heatmap makes it easy to spot which pairs interact most strongly.
+  \item Useful for identifying which parameter combinations should be explored further (e.g., in 2D PDP or targeted experiments).
+\end{itemize}
+
+\subsubsection{Output}
+\texttt{shap\_interactions\_<Y>.csv}, \texttt{shap\_interactions\_<Y>.png}
+
+\textbf{Requires:} \texttt{shap} and \texttt{xgboost} packages.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Sobol Sensitivity Indices}
+\label{sec:sobol}
+
+\subsubsection{What It Does}
+
+Decomposes the total variance of the response into contributions from individual parameters (first-order, $S_1$), total effects including all interactions (total-order, $S_T$), and pairwise interactions (second-order, $S_2$).
+
+\subsubsection{Mathematical Background}
+
+Sobol indices (Sobol', 1993) are based on the ANOVA-like decomposition of a function:
+\begin{equation}
+  f(\mathbf{x}) = f_0 + \sum_i f_i(x_i) + \sum_{i<j} f_{ij}(x_i, x_j) + \cdots
+\end{equation}
+
+\paragraph{First-order index $S_{1,i}$:}
+\begin{equation}
+  S_{1,i} = \frac{\text{Var}_{x_i}\!\left[\mathbb{E}_{\mathbf{x}_{\sim i}}(y \mid x_i)\right]}{\text{Var}(y)}
+\end{equation}
+This is the fraction of total variance explained by $x_i$ \emph{alone}, not considering interactions.
+
+\paragraph{Total-order index $S_{T,i}$:}
+\begin{equation}
+  S_{T,i} = 1 - \frac{\text{Var}_{\mathbf{x}_{\sim i}}\!\left[\mathbb{E}_{x_i}(y \mid \mathbf{x}_{\sim i})\right]}{\text{Var}(y)}
+\end{equation}
+This is the fraction of total variance explained by $x_i$ \emph{and all its interactions} with other parameters.
+
+\paragraph{Second-order index $S_{2,ij}$:}
+\begin{equation}
+  S_{2,ij} = \frac{\text{Var}_{x_i, x_j}\!\left[\mathbb{E}_{\mathbf{x}_{\sim ij}}(y \mid x_i, x_j)\right]}{\text{Var}(y)} - S_{1,i} - S_{1,j}
+\end{equation}
+This captures the variance explained by the \emph{interaction} between $x_i$ and $x_j$ specifically.
+
+\paragraph{Estimation.}  The toolkit uses the Saltelli (2002, 2010) estimator for $S_1$ and the Jansen (1999) estimator for $S_T$.  If SALib is installed, it is used for both $S_1$/$S_T$ and $S_2$; otherwise a manual implementation provides $S_1$ and $S_T$ (with $S_2 = 0$ as a placeholder).
+
+\subsubsection{Interpretation}
+
+\begin{itemize}
+  \item $S_{1,i} \approx S_{T,i}$: the parameter acts mainly alone (no significant interactions).
+  \item $S_{T,i} \gg S_{1,i}$: a large part of the parameter's influence comes through interactions with other parameters.
+  \item $\sum_i S_{1,i} \approx 1$: the model is approximately additive (no interactions).
+  \item $\sum_i S_{1,i} \ll 1$: significant interactions exist.
+  \item $S_{1,i} < 0.05$: the parameter has negligible direct influence.
+  \item $S_{T,i} < 0.05$: the parameter has negligible total influence (including interactions) and can be fixed.
+  \item $S_{2,ij}$ identifies specific interacting pairs.
+\end{itemize}
+
+\paragraph{Diagnostics.}  If $\sum S_{1,i} > 1.05$ or any $S_T < S_1$, the toolkit prints a warning.  This usually means the sample count is too low; increase \texttt{sobol\_samples} or add more DOE points.
+
+\subsubsection{Output}
+\texttt{sobol\_<Y>.csv}, \texttt{sobol\_S1\_<Y>.png}, \texttt{sobol\_ST\_<Y>.png}, \texttt{sobol\_S2\_<Y>.csv}, \texttt{sobol\_S2\_<Y>.png}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Comparing Methods: When to Use What}
+\label{sec:comparison}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{p{3.2cm}p{2.5cm}p{2.2cm}p{2.2cm}p{3cm}}
+\toprule
+\textbf{Method} & \textbf{Needs surrogate?} & \textbf{Captures nonlinearity?} & \textbf{Captures interactions?} & \textbf{Best for} \\
+\midrule
+Scatter grid & No & Visual & Visual & Initial exploration \\
+Pearson corr.\ & No & No & No & Linear screening \\
+Spearman corr.\ & No & Monotonic & No & Monotonic screening \\
+Perm.\ importance & Yes (CV) & Yes & Indirectly & Overall ranking \\
+XGBoost gain & Yes & Yes & No & Quick model-internal check \\
+Grouped perm.\ & Yes (CV) & Yes & Yes (groups) & Correlated parameters \\
+Morris screening & Yes & Yes & Yes ($\sigma$) & Efficient screening ($d > 10$) \\
+PDP/ICE & Yes & Yes & Yes (ICE) & Shape of effect \\
+SHAP & Yes & Yes & Yes (dependence) & Per-sample attribution \\
+SHAP interactions & Yes & Yes & Yes (pairwise) & Interaction identification \\
+Sobol $S_1/S_T$ & Yes & Yes & Yes ($S_T - S_1$) & Variance decomposition \\
+Sobol $S_2$ & Yes & Yes & Yes (pairwise) & Interaction quantification \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of sensitivity analysis methods.}
+\end{table}
+
+\textbf{Recommended workflow:}
+\begin{enumerate}
+  \item Start with scatter plots and correlations for a quick visual overview.
+  \item Check the surrogate $R^2$.  If it is high ($> 0.8$), all surrogate-based methods are reliable.
+  \item Use permutation importance to rank parameters.
+  \item Use PDP/ICE to understand the \emph{shape} of each important parameter's effect.
+  \item Use Sobol indices for a rigorous variance decomposition.
+  \item Use SHAP interactions or Sobol $S_2$ to identify interacting parameter pairs.
+  \item Use Morris screening as a first pass when you have many parameters ($>10$).
+\end{enumerate}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Design of Experiments: Background}
+\label{sec:doe-background}
+
+\subsection{Sobol Quasi-Random Sequences}
+
+A Sobol sequence is a \emph{low-discrepancy} (quasi-random) sequence that fills the parameter space more uniformly than pseudo-random sampling.  Key properties:
+
+\begin{itemize}
+  \item \textbf{Space-filling}: Sobol sequences avoid the clumping and gaps typical of pseudo-random sampling, especially in high dimensions.
+  \item \textbf{Deterministic}: given the same seed and dimensionality, the sequence is exactly reproducible.
+  \item \textbf{Extensible}: new points can be added without moving existing ones (used by \texttt{extend}).
+  \item \textbf{Low discrepancy}: the deviation from uniform coverage decreases as $O((\log n)^d / n)$, much faster than Monte Carlo's $O(1/\sqrt{n})$.
+\end{itemize}
+
+\subsection{Linear vs.\ Log Scale}
+
+\begin{itemize}
+  \item \textbf{Linear}: samples are drawn uniformly between \texttt{min} and \texttt{max}.  Use for parameters where equal absolute changes are equally important (e.g., temperature from 300 to 800\,K).
+  \item \textbf{Log}: samples are drawn uniformly in log-space, i.e., $x = \exp(\text{Uniform}(\ln(\text{min}), \ln(\text{max})))$.  Use for parameters that span multiple orders of magnitude (e.g., diffusion coefficient from $10^{-3}$ to $10^{1}$).
+\end{itemize}
+
+\subsection{Sample Size Guidelines}
+
+\begin{itemize}
+  \item Minimum: $10 \times d$ samples (where $d$ is the number of parameters).
+  \item Recommended: $50$--$200 \times d$ for reliable Sobol index estimation.
+  \item The toolkit defaults to $\max(10d, 50)$ if no sample count is specified.
+  \item Use \texttt{senstoolkit extend} to add more samples iteratively.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Troubleshooting}
+\label{sec:troubleshooting}
+
+\begin{description}[leftmargin=3cm,style=nextline]
+  \item[\texttt{surrogate\_ok: false}]
+    The surrogate model's CV $R^2$ is below the threshold.  Surrogate-based methods (Sobol, PDP, SHAP, Morris) are skipped.  Solutions: add more samples, check for data errors, or lower the threshold via \texttt{--r2-threshold}.
+
+  \item[Sobol $\sum S_1 > 1$]
+    Insufficient samples for reliable Sobol estimation.  Increase \texttt{--n-samples} or \texttt{sobol\_samples}.
+
+  \item[SHAP/Morris skipped]
+    The required optional packages (\texttt{shap}, \texttt{SALib}) are not installed.  Install with \texttt{pip install senstoolkit[full]}.
+
+  \item[Extend fails: ``No seed found'']
+    The sidecar file was generated before the seed-tracking feature was added.  Provide \texttt{--seed} manually with the same seed used for the original design.
+
+  \item[No sidecar file found]
+    Sobol and Morris analyses require parameter bounds from the sidecar \texttt{.params.json} file.  Re-generate the DOE with \texttt{senstoolkit design}, or create the sidecar file manually.
+\end{description}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{References}
+\label{sec:references}
+
+\begin{itemize}
+  \item Breiman, L.\ (2001). Random Forests. \emph{Machine Learning}, 45, 5--32.
+  \item Jansen, M.J.W.\ (1999). Analysis of variance designs for model output. \emph{Computer Physics Communications}, 117, 35--43.
+  \item Lundberg, S.M.\ \& Lee, S.-I.\ (2017). A unified approach to interpreting model predictions. \emph{NeurIPS}.
+  \item Morris, M.D.\ (1991). Factorial sampling plans for preliminary computational experiments. \emph{Technometrics}, 33(2), 161--174.
+  \item Saltelli, A.\ (2002). Making best use of model evaluations to compute sensitivity indices. \emph{Computer Physics Communications}, 145, 280--297.
+  \item Saltelli, A.\ et al.\ (2010). Variance based sensitivity analysis of model output. \emph{Computer Physics Communications}, 181, 259--270.
+  \item Shapley, L.S.\ (1953). A value for $n$-person games. \emph{Contributions to the Theory of Games}, 2, 307--317.
+  \item Sobol', I.M.\ (1993). Sensitivity estimates for nonlinear mathematical models. \emph{Mathematical Modelling and Computational Experiments}, 1, 407--414.
+\end{itemize}
+
+\end{document}
