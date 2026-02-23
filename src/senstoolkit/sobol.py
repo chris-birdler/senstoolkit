@@ -5,7 +5,7 @@ from scipy.stats import qmc
 
 # Try SALib for Sobol analysis
 try:
-    from SALib.sample import saltelli as salib_saltelli
+    from SALib.sample import sobol as salib_sobol_sample
     from SALib.analyze import sobol as salib_sobol
     SALIB_OK = True
 except ImportError:
@@ -30,7 +30,7 @@ def _sobol_on_surrogate_salib(model, names, dims, scales, N=8192, seed=0):
         'bounds': bounds,
     }
 
-    X_samples = salib_saltelli.sample(problem, N, seed=seed)
+    X_samples = salib_sobol_sample.sample(problem, N, seed=seed)
 
     # Transform log-scale columns back to physical space
     for j, ((vmin, vmax), sc) in enumerate(zip(dims, scales)):

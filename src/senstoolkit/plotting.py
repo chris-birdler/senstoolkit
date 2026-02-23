@@ -61,9 +61,10 @@ def partial_dependence_plots(model, X, names, top_idx, out_dir, label):
             plt.xlabel(fname)
             plt.ylabel("Partial dependence")
         plt.title(f"PDP/ICE — {label} — {fname}")
-        ensure_outdir(os.path.join(out_dir, "pdp"))
+        pdp_path = os.path.join(out_dir, "pdp", f"pdp_{label}_{fname}.png")
+        ensure_outdir(pdp_path)
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "pdp", f"pdp_{label}_{fname}.png"), dpi=150)
+        plt.savefig(pdp_path, dpi=150)
         plt.close()
 
 
@@ -89,8 +90,9 @@ def shap_global_and_dependence(sigma_y, model, X, names, out_dir, label, top_k=1
             plt.xlabel(names[j]); plt.ylabel("SHAP value")
             plt.title(f"SHAP dependence — {label} — {names[j]}")
             plt.tight_layout()
-            ensure_outdir(os.path.join(out_dir, "shap"))
-            plt.savefig(os.path.join(out_dir, "shap", f"shap_dep_{label}_{names[j]}.png"), dpi=150)
+            shap_path = os.path.join(out_dir, "shap", f"shap_dep_{label}_{names[j]}.png")
+            ensure_outdir(shap_path)
+            plt.savefig(shap_path, dpi=150)
             plt.close()
         return mean_abs
     except Exception:

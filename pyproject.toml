@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = ["xgboost", "shap", "SALib"]
+full = ["xgboost", "shap", "SALib>=1.4.7"]
 
 [project.scripts]
 senstoolkit = "senstoolkit.cli:main"

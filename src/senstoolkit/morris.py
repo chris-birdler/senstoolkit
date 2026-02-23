@@ -55,8 +55,13 @@ def morris_screening(param_cols, dims, scales, model, N=100, num_levels=4, seed=
         'bounds': bounds,
     }
 
-    X_samples = salib_morris_sample.sample(problem, N=N, num_levels=num_levels,
-                                           seed=seed)
+    try:
+        X_samples = salib_morris_sample.sample(problem, N=N, num_levels=num_levels,
+                                               seed=seed)
+    except TypeError:
+        # Older SALib versions may not accept seed=
+        np.random.seed(seed)
+        X_samples = salib_morris_sample.sample(problem, N=N, num_levels=num_levels)
 
     # Transform log-scale columns back to physical space
     for j, ((vmin, vmax), sc) in enumerate(zip(dims, scales)):
