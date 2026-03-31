@@ -1,6 +1,6 @@
 import argparse
 
-from .doe import design, extend_design
+from .doe import design, extend_design, suggest_points
 from .analyze import analyze
 from .utils import write_params_template
 
@@ -52,6 +52,24 @@ def main():
     p_ext.add_argument("--seed", type=int, default=None,
                        help="Random seed (default: read from sidecar _meta).")
 
+    # --- suggest ---
+    p_sug = sub.add_parser("suggest",
+                           help="Suggest new simulation points targeting a specific response region.")
+    p_sug.add_argument("--csv", required=True, help="Path to the existing DOE CSV with response data.")
+    p_sug.add_argument("--response-col", required=True,
+                       help="Response column to target.")
+    p_sug.add_argument("--n-suggest", type=int, required=True,
+                       help="Number of points to suggest.")
+    p_sug.add_argument("--output", default=None,
+                       help="Output CSV path (default: suggest_<response_col>.csv).")
+    p_sug.add_argument("--target", default="high", choices=["high", "low"],
+                       help="Target region: 'high' or 'low' response values (default: high).")
+    p_sug.add_argument("--quantile", type=float, default=0.8,
+                       help="Quantile threshold for filtering candidates (default: 0.8).")
+    p_sug.add_argument("--n-candidates", type=int, default=10000,
+                       help="Size of Sobol candidate pool to screen (default: 10000).")
+    p_sug.add_argument("--seed", type=int, default=None, help="Random seed.")
+
     args = parser.parse_args()
 
     if args.command == "template":
@@ -76,6 +94,11 @@ def main():
         )
     elif args.command == "extend":
         extend_design(args.csv, args.n_new, out_csv=args.output, seed=args.seed)
+    elif args.command == "suggest":
+        suggest_points(args.csv, args.response_col, args.n_suggest,
+                       out_csv=args.output, target=args.target,
+                       quantile=args.quantile, n_candidates=args.n_candidates,
+                       seed=args.seed)
 
 
 if __name__ == "__main__":
