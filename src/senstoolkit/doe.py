@@ -185,3 +185,135 @@ def extend_design(existing_csv, n_new, out_csv=None, seed=None):
     print(f"Extended DOE: {n_existing} -> {n_existing + n_new} samples.")
     print(f"Written to: {out_csv}")
     return out_csv
+
+
+def suggest_points(existing_csv, response_col, n_suggest, out_csv=None,
+                   target="high", quantile=0.8, n_candidates=10000, seed=None):
+    """Suggest new simulation points targeting a specific response region.
+
+    Uses the existing data to train a surrogate model, generates a large
+    pool of Sobol candidates, predicts their responses, and selects the
+    ones most likely to fall in the target region (e.g. high response values
+    where data is sparse).
+
+    Parameters
+    ----------
+    existing_csv : str
+        Path to the existing DOE CSV with filled response values.
+    response_col : str
+        Name of the response column to target.
+    n_suggest : int
+        Number of points to suggest.
+    out_csv : str or None
+        Output CSV path. If None, writes to suggest_<response_col>.csv.
+    target : str
+        "high" to target high response values, "low" for low values.
+    quantile : float
+        Quantile threshold (0-1). For "high", keeps candidates above this
+        quantile of predicted values. For "low", keeps below (1-quantile).
+    n_candidates : int
+        Size of the Sobol candidate pool to screen.
+    seed : int or None
+        Random seed.
+
+    Returns
+    -------
+    str
+        Path to the written CSV.
+    """
+    from .importance import fit_model
+
+    # 1. Read existing data and sidecar
+    df = pd.read_csv(existing_csv)
+    if response_col not in df.columns:
+        raise ValueError(f"Response column '{response_col}' not found in CSV.")
+
+    sidecar_path = os.path.splitext(existing_csv)[0] + ".params.json"
+    if not os.path.exists(sidecar_path):
+        raise FileNotFoundError(
+            f"Sidecar file not found: {sidecar_path}. "
+            f"Parameter bounds are required for candidate generation.")
+
+    with open(sidecar_path, "r", encoding="utf-8") as f:
+        sidecar_data = json.load(f)
+
+    names, dims, scales = [], [], []
+    for name, spec in sidecar_data.items():
+        if name == "_meta":
+            continue
+        vmin, vmax = float(spec["min"]), float(spec["max"])
+        sc = str(spec.get("scale", "linear")).lower()
+        names.append(name)
+        dims.append((vmin, vmax))
+        scales.append(sc)
+
+    # 2. Prepare training data
+    y = pd.to_numeric(df[response_col], errors="coerce").values
+    X = df[names].apply(pd.to_numeric, errors="coerce").values
+    mask = np.isfinite(y) & np.all(np.isfinite(X), axis=1)
+    X_train, y_train = X[mask], y[mask]
+    if len(y_train) < 10:
+        raise ValueError(f"Only {len(y_train)} valid rows — too few to train a surrogate.")
+
+    # 3. Train surrogate
+    rs = seed if seed is not None else 0
+    model = fit_model(X_train, y_train, random_state=rs)
+    print(f"[SUGGEST] Trained surrogate on {len(y_train)} rows.")
+
+    # 4. Generate large candidate pool
+    cand_seed = rs + 9999
+    d = len(names)
+    engine = qmc.Sobol(d=d, scramble=True, seed=cand_seed)
+    u = engine.random(n=n_candidates)
+    X_cand = np.empty_like(u)
+    for j, ((vmin, vmax), sc) in enumerate(zip(dims, scales)):
+        if sc == "log":
+            lo, hi = math.log(vmin), math.log(vmax)
+            X_cand[:, j] = np.exp(lo + u[:, j] * (hi - lo))
+        else:
+            X_cand[:, j] = vmin + u[:, j] * (vmax - vmin)
+
+    # 5. Predict and filter
+    y_pred = model.predict(X_cand)
+
+    if target == "high":
+        threshold = np.quantile(y_pred, quantile)
+        mask_target = y_pred >= threshold
+    elif target == "low":
+        threshold = np.quantile(y_pred, 1.0 - quantile)
+        mask_target = y_pred <= threshold
+    else:
+        raise ValueError(f"target must be 'high' or 'low', got '{target}'.")
+
+    X_filtered = X_cand[mask_target]
+    y_filtered = y_pred[mask_target]
+
+    if len(X_filtered) == 0:
+        raise RuntimeError("No candidates passed the filter — try lowering the quantile.")
+
+    # 6. Select top-N by predicted response
+    if target == "high":
+        order = np.argsort(-y_filtered)
+    else:
+        order = np.argsort(y_filtered)
+    sel = order[:n_suggest]
+
+    X_out = X_filtered[sel]
+    y_out = y_filtered[sel]
+
+    # 7. Write output
+    if out_csv is None:
+        out_csv = f"suggest_{response_col}.csv"
+    ensure_outdir(out_csv)
+
+    df_out = pd.DataFrame(X_out, columns=names)
+    df_out.insert(0, "id", range(len(df_out)))
+    df_out[f"{response_col}_predicted"] = y_out
+    df_out[response_col] = ""  # empty column for actual simulation results
+    df_out.to_csv(out_csv, index=False)
+
+    print(f"[SUGGEST] Target: {target} {response_col} (threshold: {threshold:.4f})")
+    print(f"[SUGGEST] Predicted range of suggestions: "
+          f"{y_out.min():.4f} — {y_out.max():.4f}")
+    print(f"[SUGGEST] Wrote {len(X_out)} suggested points to: {out_csv}")
+    return out_csv
