@@ -188,7 +188,8 @@ def extend_design(existing_csv, n_new, out_csv=None, seed=None):
 
 
 def suggest_points(existing_csv, response_col, n_suggest, out_csv=None,
-                   target="high", quantile=0.8, n_candidates=10000, seed=None):
+                   target="high", quantile=0.8, n_candidates=10000, seed=None,
+                   strategy="random"):
     """Suggest new simulation points targeting a specific response region.
 
     Uses the existing data to train a surrogate model, generates a large
@@ -215,6 +216,9 @@ def suggest_points(existing_csv, response_col, n_suggest, out_csv=None,
         Size of the Sobol candidate pool to screen.
     seed : int or None
         Random seed.
+    strategy : str
+        "random" to sample randomly from the filtered region, "top" to
+        pick the N most extreme predicted values.
 
     Returns
     -------
@@ -291,11 +295,17 @@ def suggest_points(existing_csv, response_col, n_suggest, out_csv=None,
     if len(X_filtered) == 0:
         raise RuntimeError("No candidates passed the filter — try lowering the quantile.")
 
-    # 6. Randomly sample N points from the filtered region
-    rng = np.random.default_rng(rs)
+    # 6. Select N points from the filtered region
     if n_suggest >= len(X_filtered):
         sel = np.arange(len(X_filtered))
+    elif strategy == "top":
+        if target == "high":
+            order = np.argsort(-y_filtered)
+        else:
+            order = np.argsort(y_filtered)
+        sel = order[:n_suggest]
     else:
+        rng = np.random.default_rng(rs)
         sel = rng.choice(len(X_filtered), size=n_suggest, replace=False)
 
     X_out = X_filtered[sel]
