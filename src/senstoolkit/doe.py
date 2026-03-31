@@ -291,12 +291,12 @@ def suggest_points(existing_csv, response_col, n_suggest, out_csv=None,
     if len(X_filtered) == 0:
         raise RuntimeError("No candidates passed the filter — try lowering the quantile.")
 
-    # 6. Select top-N by predicted response
-    if target == "high":
-        order = np.argsort(-y_filtered)
+    # 6. Randomly sample N points from the filtered region
+    rng = np.random.default_rng(rs)
+    if n_suggest >= len(X_filtered):
+        sel = np.arange(len(X_filtered))
     else:
-        order = np.argsort(y_filtered)
-    sel = order[:n_suggest]
+        sel = rng.choice(len(X_filtered), size=n_suggest, replace=False)
 
     X_out = X_filtered[sel]
     y_out = y_filtered[sel]
