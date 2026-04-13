@@ -63,14 +63,21 @@ def analyze(design_csv, response_cols, out_dir="outputs",
             cv_folds=5, perm_repeats=20, bootstrap_corr=1000, group_corr_threshold=0.9,
             top_k_pdp=6, do_pdp=True, do_shap=True, do_group_perm=True,
             do_sobol=True, sobol_samples=2048,
-            do_morris=True, do_scatter=True, r2_threshold=0.5):
+            do_morris=True, do_scatter=True, r2_threshold=0.5,
+            feature_cols=None, sep=","):
     if not response_cols:
         raise ValueError("response_cols must be provided and non-empty.")
-    df_input = pd.read_csv(design_csv)
+    df_input = pd.read_csv(design_csv, sep=sep)
 
-    # Exclude 'id' and all response columns from features
-    exclude = {"id"} | set(response_cols)
-    raw_param_cols = [h for h in df_input.columns if h not in exclude]
+    if feature_cols is not None:
+        missing_features = [c for c in feature_cols if c not in df_input.columns]
+        if missing_features:
+            raise ValueError(f"Feature columns not found in CSV: {missing_features}")
+        raw_param_cols = list(feature_cols)
+    else:
+        # Exclude 'id' and all response columns from features
+        exclude = {"id"} | set(response_cols)
+        raw_param_cols = [h for h in df_input.columns if h not in exclude]
     if not raw_param_cols:
         raise ValueError("No parameter columns found.")
 
@@ -90,6 +97,8 @@ def analyze(design_csv, response_cols, out_dir="outputs",
         with open(sidecar_json, "r", encoding="utf-8") as f:
             pj = json.load(f)
         if pj is not None:
+            if feature_cols is not None and isinstance(pj, dict):
+                pj = {k: v for k, v in pj.items() if k in raw_param_cols or k == "_meta"}
             param_cols, dims, scales = build_bounds_scales_by_name(raw_param_cols, pj)
     else:
         print("[INFO] No sidecar parameter file found; Sobol/Morris analysis will be skipped.")
